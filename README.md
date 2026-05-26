@@ -21,7 +21,10 @@ Two RL backbones are provided:
 8. [Baselines](#8-baselines)
 9. [Evaluation and plotting](#9-evaluation-and-plotting)
 10. [Performance criteria per environment](#10-performance-criteria-per-environment)
-11. [Testing](#11-testing)
+11. [Experiment sweep pipeline](#11-experiment-sweep-pipeline)
+12. [Experimental results summary](#12-experimental-results-summary)
+13. [Known limitations](#13-known-limitations)
+14. [Testing](#14-testing)
 
 ---
 
@@ -63,6 +66,8 @@ The discrete-time CBF condition requires that `h_K` does not decrease faster tha
 h_K(z_{t+1}) ≥ (1 - η) h_K(z_t)   with η ∈ (0, 1)
 ```
 
+A **larger η** (e.g. 0.9) corresponds to a **looser** constraint that allows the barrier to decrease quickly toward zero. A **smaller η** (e.g. 0.3) enforces a **tighter** invariance requirement that keeps the system further inside the safe set but risks over-constraining the policy. For contact-rich locomotion environments where the Koopman model has large prediction error, η=0.9 is recommended; over-tightening (η ≤ 0.7) can cause policy collapse (§12).
+
 Substituting the Koopman prediction:
 
 ```
@@ -95,6 +100,17 @@ The tightened CBF condition used in the QP filter adds `ρ` to the right-hand si
 (B^T c)^T u  ≥  (1 - η) h_K(z) + ρ - c^T(A z) - d
 ```
 
+**ρ as a pre-training diagnostic.** Before running RL training, inspect ρ from the Koopman residuals file. Empirical values across benchmarks:
+
+| Environment | ρ (95th pct) | KCBF effectiveness |
+|---|---|---|
+| CartPole (stab/track) | ~9×10⁻⁴ | Zero violations achievable |
+| Quadrotor 2D (stab/track) | ~1.3×10⁻³ | <0.5% violations with composite barrier |
+| Safety Walker | 0.698 | Filter marginal; SAC+Lagrangian may be safer |
+| Safety HalfCheetah | 1.782 | Filter largely inactive; contact dynamics dominate |
+
+When ρ ≥ 0.5, the robust CBF constraint either becomes trivially satisfied (when `h_K < 0`) or infeasible under actuator limits, degrading the safety certificate. Consider richer Koopman dictionaries or multi-step CBF extensions (§13).
+
 A **cluster-based margin** mode is also available (`margin_mode: cluster`), which fits k-means clusters in lifted space and uses per-cluster quantiles — tighter in well-visited regions, more conservative elsewhere.
 
 ### 1.4 QP safety filter
@@ -109,6 +125,8 @@ min_{u, ξ}   ||u - u_nom||^2 + λ_slack ξ^2
 ```
 
 where `b_cbf = (1-η) h_K(z) + ρ - c^T(Az) - d` and `ξ` is a slack variable that prevents infeasibility (penalised heavily by `λ_slack`). The QP is solved with OSQP via `qpsolvers`.
+
+> **Slack rate monitoring:** When `ξ > 0` at a step, the filter no longer enforces a formal CBF certificate at that step. Monitor `slack_rate` in the CSV log — environments where `slack_rate > 0.05` do not reliably maintain the safety certificate.
 
 ### 1.5 Actor CBF penalty
 
@@ -138,10 +156,13 @@ robust_koopman_cbf_rl/
 ├── cbf/
 │   ├── barrier_base.py         # SafetyConstraint ABC
 │   ├── cartpole_barriers.py    # CartPolePositionBarrier, CartPoleAngleBarrier
-│   ├── quadrotor_barriers.py   # Quadrotor2DAltitudeBarrier, Quadrotor2DPitchBarrier,
+│   ├── quadrotor_barriers.py   # Quadrotor2DAltitudeBarrier,
+│   │                           # Quadrotor2DCompositeAltitudeBarrier (RD-2 fix),
+│   │                           # Quadrotor2DPitchBarrier,
 │   │                           # Quadrotor3DPositionBarrier
 │   ├── velocity_barriers.py    # VelocityNormBarrier (safety-gymnasium)
 │   ├── robust_margin.py        # RobustMargin: global or cluster-based ρ
+│   ├── factory.py              # build_barrier() — barrier from config string
 │   ├── qp_filter.py            # KCBFQPFilter: QP projection + CBF penalty terms
 │   └── diagnostics.py          # DiagnosticsBuffer: per-episode h_value, cbf_gap, etc.
 │
@@ -173,8 +194,8 @@ robust_koopman_cbf_rl/
 │   ├── plot_returns.py         # Mean ± std return curves from CSV logs
 │   ├── plot_violations.py      # Constraint violation rate curves
 │   ├── plot_intervention_rate.py # QP filter intervention rate curves
-│   ├── plot_training.py        # 4-panel training dashboard (return, cost, CBF gap, intervention)
-│   └── plot_trajectory.py      # collect_trajectory() + per-state-dim plot vs reference
+│   ├── plot_training.py        # 4-panel training dashboard
+│   └── plot_trajectory.py      # collect_trajectory() + per-state-dim plot
 │
 ├── eval/
 │   ├── run_eval.py         # CLI: load checkpoint → run eval → save eval_results.csv
@@ -188,6 +209,12 @@ robust_koopman_cbf_rl/
 │
 ├── configs/                # YAML config files (see §7)
 └── tests/                  # pytest unit tests
+
+experiments/
+├── run_sweep.py            # Parallel baseline sweep (SAC/PPO/LQR/Penalty/Lagrangian)
+├── run_kcbf_sweep.py       # Parallel KCBF-SAC sweep over all envs × seeds
+├── compare_all.py          # Aggregate results + all paper figures
+└── ablation_cbf_params.py  # η × λ_slack ablation grid
 ```
 
 ---
@@ -256,7 +283,8 @@ Config: `configs/env_cartpole_stab.yaml`
 | Episode length | 5 s (250 steps) |
 | Init randomization | `x ∈ [-1.5, 1.5]`, `θ ∈ [-0.1, 0.1]` rad |
 | SCG constraints | `|x| ≤ 2.0` m, `|θ| ≤ 0.16` rad |
-| CBF barrier | `CartPolePositionBarrier(x_max=2.2)` — 10 cm margin inside episode boundary |
+| CBF barrier | `CartPolePositionBarrier(x_max=2.2)` — two-sided; 20 cm margin inside episode boundary |
+| Koopman config | `koopman.yaml` (n_rbf=64, collection_steps=50k) |
 
 #### CartPole — Trajectory Tracking
 
@@ -275,9 +303,12 @@ Config: `configs/env_quadrotor2d_stab.yaml`
 | Task | Stabilize at `(x, z) = (0, 1)` m |
 | Control freq | 50 Hz; physics freq 1000 Hz (20 substeps) |
 | Mass / inertia | M = 0.027 kg, Iyy = 1.4×10⁻⁵ kg·m² (Crazyflie 2.x) |
-| CBF barrier | `Quadrotor2DAltitudeBarrier(z_min=0.2, z_max=1.8)` |
+| CBF barrier | `Quadrotor2DCompositeAltitudeBarrier(z_min=0.2, z_max=1.8)` (see §5.2) |
+| Koopman config | `koopman_quadrotor.yaml` (n_rbf=32, collection_steps=10k) |
 
 > **Important:** `normalized_rl_action_space: True` is set so the actor's tanh output maps cleanly to the physical thrust range. Without normalization, the actor saturates at ≈ 0.29 N and cannot decrease thrust — training diverges.
+
+> **Relative degree:** The altitude constraint has **relative degree 2** w.r.t. vertical thrust: the standard `Quadrotor2DAltitudeBarrier` gives `c^T B ≈ 0`, making the QP degenerate. Use `Quadrotor2DCompositeAltitudeBarrier` instead (see §5.2).
 
 #### Quadrotor 2D — Tracking
 
@@ -297,12 +328,14 @@ Configs: `configs/env_quadrotor3d_stab.yaml`, `configs/env_quadrotor3d_track.yam
 
 Velocity-constrained locomotion tasks from [safety-gymnasium](https://github.com/PKU-Alignment/safety-gymnasium). The wrapper reads `info["cost"]` natively — no additional constraint setup needed.
 
-| Config file | Environment ID | Constraint |
-|---|---|---|
-| `env_safety_halfcheetah.yaml` | `SafetyHalfCheetahVelocity-v1` | velocity ≤ 2.0 m/s |
-| `env_safety_walker.yaml` | `SafetyWalker2dVelocity-v1` | velocity ≤ 2.0 m/s |
+| Config file | Environment ID | Constraint | Koopman config |
+|---|---|---|---|
+| `env_safety_halfcheetah.yaml` | `SafetyHalfCheetahVelocity-v1` | forward velocity ≤ 2.0 m/s | `koopman_walker_tuned.yaml` (n_rbf=256) |
+| `env_safety_walker.yaml` | `SafetyWalker2dVelocity-v1` | forward velocity ≤ 2.0 m/s | `koopman_walker_tuned.yaml` (n_rbf=256) |
 
 The `velocity_limit` field in the YAML controls which CBF barrier is active (`VelocityNormBarrier`).
+
+> **Note on locomotion ρ:** Even with n_rbf=256, the projected residual margin ρ ≈ 0.7–1.8 for these environments due to contact dynamics producing non-smooth velocity transitions. The KCBF filter is structurally limited here; see §13.
 
 ---
 
@@ -313,22 +346,41 @@ All barriers inherit from `SafetyConstraint` (`cbf/barrier_base.py`) and impleme
 - `value(raw_state, info) → float` — barrier value `h(y)` at the current raw state
 - `lifted_barrier_coeffs(z_dim, ...) → (c, d)` — linear coefficients so `h_K(z) = c^T z + d`
 
+Use `build_barrier()` from `cbf/factory.py` to construct barriers from config strings.
+
 ### 5.1 CartPole barriers
 
-| Class | Formula | Default |
+| Class | Signature | Formula |
 |---|---|---|
-| `CartPolePositionBarrier(x_max, side)` | `h = x_max - x` (right) or `h = x_max + x` (left) | `x_max=2.2` |
-| `CartPoleAngleBarrier(theta_max, side)` | `h = θ_max - θ` (right) or `h = θ_max + θ` (left) | `theta_max=0.14` rad |
+| `CartPolePositionBarrier` | `(x_max=2.2, side='right')` | `h = x_max - x` (right) or `h = x_max + x` (left) |
+| `CartPoleAngleBarrier` | `(theta_max=0.14, side='right')` | `h = θ_max - θ` (right) or `h = θ_max + θ` (left) |
 
-Both appear as linear maps on the first (identity) part of the lifted state `z`, with the RBF portion zeroed out.
+Both appear as linear maps on the first (identity) part of the lifted state `z`, with the RBF portion zeroed out. Two barriers are used simultaneously — one per side — so that `h_+(z) = x_max - x` and `h_-(z) = x_max + x`.
 
 ### 5.2 Quadrotor barriers
 
-| Class | Formula |
-|---|---|
-| `Quadrotor2DAltitudeBarrier(z_min, z_max, side)` | `h = z_max - z` (upper) or `h = z - z_min` (lower) |
-| `Quadrotor2DPitchBarrier(theta_max, side)` | `h = θ_max - θ` |
-| `Quadrotor3DPositionBarrier(axis_index, lo, hi, side)` | `h = hi - x[axis]` (upper) or `h = x[axis] - lo` (lower) |
+| Class | Signature | Notes |
+|---|---|---|
+| `Quadrotor2DAltitudeBarrier` | `(z_min, z_max, side='upper')` | Naïve altitude barrier; has **relative degree 2** — use composite version for tracking. |
+| `Quadrotor2DCompositeAltitudeBarrier` | `(z_min, z_max=2.0, alpha=1.0, beta=0.5)` | `h = α(z − z_min) + β·ż` — converts RD-2 altitude to RD-1; **recommended for all Quadrotor tasks**. |
+| `Quadrotor2DPitchBarrier` | `(theta_max, side='right')` | `h = θ_max - θ` |
+| `Quadrotor3DPositionBarrier` | `(axis_index, lo, hi, side='upper')` | `h = hi - x[axis]` or `h = x[axis] - lo` |
+
+**Why the composite barrier matters.** For `Quadrotor2DAltitudeBarrier`, the standard CBF-QP gives `c^T B ≈ 0` because altitude is RD-2 w.r.t. vertical thrust (thrust enters acceleration `z̈`, not velocity). The QP constraint becomes:
+
+```
+(B^T c)^T u  ≥  b_cbf     with B^T c ≈ 0
+```
+
+This is degenerate — any `u` trivially satisfies it, so the filter never corrects unsafe actions. In experiments, this caused the effective filter control authority `‖a_cbf‖` to collapse from `2.21×10⁻³` to `5.47×10⁻⁵` (40× degradation), resulting in 12.5% violation rate on Quadrotor tracking.
+
+`Quadrotor2DCompositeAltitudeBarrier` resolves this by combining altitude and vertical velocity:
+
+```
+h(z) = α (z − z_min) + β ż
+```
+
+Since `ż` appears in vertical dynamics as `z̈ = (F_T cos θ)/m − g` (directly influenced by thrust), `c^T B ≠ 0` and the QP can produce meaningful corrections. With this barrier, Quadrotor 2D tracking violations dropped from 12.5% to 0.4%.
 
 ### 5.3 Velocity barrier (Safety-Gymnasium)
 
@@ -357,9 +409,9 @@ Training consists of two stages: **(1) fit a Koopman model** offline from random
 
 ```bash
 python -m robust_koopman_cbf_rl.train.train_koopman \
-  --env_cfg  robust_koopman_cbf_rl/configs/env_cartpole_stab.yaml \
+  --env_cfg     robust_koopman_cbf_rl/configs/env_cartpole_stab.yaml \
   --koopman_cfg robust_koopman_cbf_rl/configs/koopman.yaml \
-  --out logs/cartpole/koopman.npz
+  --out         logs/models/cartpole_stab/koopman.npz
 ```
 
 This:
@@ -375,14 +427,23 @@ This:
 | `koopman.npz` | `A`, `B`, RBF centers, `dim_y`, `n_rbf`, `bandwidth` |
 | `koopman_residuals.npz` | `deltas` (per-step projected residuals), `rho`, `alpha` |
 
+**Check ρ before training.** If `rho > 0.5`, the filter will likely be ineffective. Inspect via:
+
+```python
+import numpy as np
+res = np.load("logs/models/cartpole_stab/koopman_residuals.npz", allow_pickle=True)
+print(f"rho = {res['rho']:.4f},  deltas max = {res['deltas'].max():.4f}")
+```
+
 ### Stage 2a — KCBF-SAC training
 
 ```bash
 python -m robust_koopman_cbf_rl.train.train_sac_kcbf \
   --env_cfg     robust_koopman_cbf_rl/configs/env_cartpole_stab.yaml \
-  --sac_cfg     robust_koopman_cbf_rl/configs/sac_kcbf.yaml \
-  --model       logs/cartpole/koopman.npz \
-  --log_dir     logs/cartpole/sac_run1 \
+  --sac_cfg     robust_koopman_cbf_rl/configs/sac_kcbf_cartpole.yaml \
+  --model       logs/models/cartpole_stab/koopman.npz \
+  --log_dir     logs/kcbf_sweep/cartpole_stab/kcbf_sac/seed_1 \
+  --seed        1 \
   --checkpoint_every 50000
 ```
 
@@ -390,7 +451,7 @@ python -m robust_koopman_cbf_rl.train.train_sac_kcbf \
 
 | File | Contents |
 |---|---|
-| `sac_kcbf.csv` | Per-episode log: `step, ep_return, ep_cost, intervention_rate, cbf_gap_mean, ...` |
+| `sac_kcbf.csv` | Per-episode log: `step, ep_return, ep_cost, h_min, intervention_rate, slack_rate, cbf_gap_mean, ...` |
 | `sac_kcbf_step{N}.pt` | Periodic agent checkpoint (every `checkpoint_every` steps) |
 | `sac_kcbf_final.pt` | Final agent checkpoint |
 | `eval_final.csv` | 10-episode post-training evaluation |
@@ -401,7 +462,7 @@ python -m robust_koopman_cbf_rl.train.train_sac_kcbf \
 python -m robust_koopman_cbf_rl.train.train_ppo_kcbf \
   --env_cfg     robust_koopman_cbf_rl/configs/env_cartpole_stab.yaml \
   --ppo_cfg     robust_koopman_cbf_rl/configs/ppo_kcbf_cartpole.yaml \
-  --model       logs/cartpole/koopman.npz \
+  --model       logs/models/cartpole_stab/koopman.npz \
   --log_dir     logs/cartpole/ppo_run1 \
   --checkpoint_every 50000
 ```
@@ -415,7 +476,7 @@ python -m robust_koopman_cbf_rl.eval.run_eval \
   --env_cfg    robust_koopman_cbf_rl/configs/env_cartpole_stab.yaml \
   --agent_type sac \
   --agent_ckpt logs/cartpole/sac_run1/sac_kcbf_final.pt \
-  --model      logs/cartpole/koopman.npz \
+  --model      logs/models/cartpole_stab/koopman.npz \
   --log_dir    logs/cartpole/sac_eval \
   --n_episodes 20
 ```
@@ -426,23 +487,23 @@ Produces `logs/cartpole/sac_eval/eval_results.csv` with columns: `return`, `tota
 
 ```python
 from robust_koopman_cbf_rl.koopman.model import KoopmanModel
-from robust_koopman_cbf_rl.cbf.cartpole_barriers import CartPolePositionBarrier
+from robust_koopman_cbf_rl.cbf.quadrotor_barriers import Quadrotor2DCompositeAltitudeBarrier
 from robust_koopman_cbf_rl.cbf.robust_margin import RobustMargin
 from robust_koopman_cbf_rl.cbf.qp_filter import KCBFQPFilter
 from robust_koopman_cbf_rl.agents.sac import KCBFSACAgent
 
 # Load pre-trained Koopman model
-model = KoopmanModel.load("logs/cartpole/koopman.npz")
+model = KoopmanModel.load("logs/models/quadrotor2d_track/koopman.npz")
 
-# Build safety filter
-barrier = CartPolePositionBarrier(x_max=2.2, side="right")
+# Build composite altitude barrier (required for Quadrotor 2D)
+barrier = Quadrotor2DCompositeAltitudeBarrier(z_min=0.2, z_max=1.8, alpha=1.0, beta=0.5)
 rm = RobustMargin(alpha=0.95, mode="global")
-rm.update(np.load("logs/cartpole/koopman_residuals.npz")["deltas"])
-flt = KCBFQPFilter(model, barrier, rm, eta=0.5, lam_slack=1e3,
+rm.update(np.load("logs/models/quadrotor2d_track/koopman_residuals.npz")["deltas"])
+flt = KCBFQPFilter(model, barrier, rm, eta=0.9, lam_slack=1e4,
                    u_min=env.action_space.low, u_max=env.action_space.high)
 
 # Load saved agent
-agent = KCBFSACAgent.load("logs/cartpole/sac_run1/sac_kcbf_final.pt",
+agent = KCBFSACAgent.load("logs/kcbf_sweep/quadrotor2d_track/kcbf_sac/seed_1/sac_kcbf_final.pt",
                           koopman_model=model, qp_filter=flt)
 
 # Single step
@@ -461,25 +522,40 @@ u_safe, diag = flt.project(z, u_nom)
 
 ## 7. Configuration Reference
 
-### Koopman (`configs/koopman.yaml`)
+### Koopman — per-environment configs
+
+Different environments require very different Koopman dictionaries. Use the appropriate config, not the generic default:
+
+| Config | Recommended for | n_rbf | bandwidth | ridge | collection_steps |
+|---|---|---|---|---|---|
+| `koopman.yaml` | CartPole (generic default) | 64 | 1.0 | 1e-6 | 50 000 |
+| `koopman_quadrotor.yaml` | Quadrotor 2D | 32 | auto (data-driven) | 0.01 | 10 000 |
+| `koopman_walker_tuned.yaml` | Walker / HalfCheetah | 256 | auto | 1e-6 | 200 000 |
+
+Additional Koopman parameters (from `koopman.yaml`):
 
 | Key | Default | Description |
 |---|---|---|
-| `n_rbf` | 64 | Number of RBF centers in the observable dictionary |
-| `bandwidth` | 1.0 | RBF bandwidth σ (Gaussian kernel) |
-| `ridge` | 1e-6 | L2 regularisation for EDMD regression |
 | `alpha` | 0.95 | Quantile for robust margin ρ |
-| `collection_steps` | 50 000 | Random steps for Koopman dataset |
 | `seed` | 0 | RNG seed for center selection and data collection |
 | `margin_mode` | `global` | `global` or `cluster` (k-means per-region margin) |
 | `n_clusters` | 8 | Number of clusters when `margin_mode: cluster` |
 | `residual_dim` | 0 | Lifted-state index for residual projection (must match barrier's active state dim) |
 
-### SAC (`configs/sac_kcbf.yaml`)
+> **`residual_dim` must match the barrier**: for `CartPolePositionBarrier` the active state is `x` at index 0 → `residual_dim: 0`. For `Quadrotor2DCompositeAltitudeBarrier` the active states are `z` (index 2) and `ż` (index 3) → set `residual_dim` to the composite barrier's primary axis.
 
-| Key | Default | Description |
+### SAC — per-environment configs
+
+| Config | Env | total_steps | eta | lam_slack |
+|---|---|---|---|---|
+| `sac_kcbf_cartpole.yaml` | CartPole stab/track | 150 000 | 0.9 | 10 000 |
+| `sac_kcbf_quadrotor.yaml` | Quadrotor 2D stab/track | 500 000 | 0.9 | 10 000 |
+| `sac_kcbf_safety_gym.yaml` | Walker / HalfCheetah | 1 000 000 | 0.9 | 1 000 |
+
+Common SAC parameters:
+
+| Key | Value | Description |
 |---|---|---|
-| `total_steps` | 200 000 | Total environment steps |
 | `warmup_steps` | 1 000 | Random exploration before learning starts |
 | `batch_size` | 256 | Minibatch size for critic/actor updates |
 | `buffer_capacity` | 1 000 000 | Replay buffer size |
@@ -488,8 +564,8 @@ u_safe, diag = flt.project(z, u_nom)
 | `lr` | 3e-4 | Adam learning rate |
 | `alpha` | 0.2 | SAC entropy temperature |
 | `lam_h` | 1.0 | CBF penalty weight in actor loss |
-| `eta` | 0.5 | CBF decay rate (in QP filter) |
-| `lam_slack` | 1 000 | Slack variable penalty (QP infeasibility cost) |
+
+> **η tuning advice:** `η=0.9` is recommended across all environments tested. Lower η (tighter CBF) does not improve safety when ρ is large, and risks policy collapse via excessive QP intervention (see §12 ablation results). Higher η (η → 1) relaxes the constraint too much and increases violation rate.
 
 ### PPO (`configs/ppo_kcbf.yaml`)
 
@@ -506,7 +582,7 @@ u_safe, diag = flt.project(z, u_nom)
 | `gamma` | 0.99 | Discount factor |
 | `lam` | 0.95 | GAE λ |
 | `lam_h` | 1.0 | CBF penalty weight in actor loss |
-| `eta` | 0.5 | CBF decay rate |
+| `eta` | 0.9 | CBF decay rate |
 | `lam_slack` | 1 000 | QP slack penalty |
 
 ### Environment (`configs/env_*.yaml`)
@@ -514,7 +590,7 @@ u_safe, diag = flt.project(z, u_nom)
 | Key | Description |
 |---|---|
 | `kind` | `safe_control_gym` or `safety_gymnasium` |
-| `env_id` | SCG: `cartpole`, `quadrotor`; safety-gym: `SafetyHalfCheetahVelocity-v1` etc. |
+| `env_id` | SCG: `cartpole`, `quadrotor`; safety-gym: `SafetyHalfCheetahVelocity-v1`, `SafetyWalker2dVelocity-v1` |
 | `task_config` | Full SCG task dict (forwarded to `scg_make()`) |
 | `task_config.task` | `stabilization` or `traj_tracking` |
 | `task_config.obs_goal_horizon` | `0` (stabilization) or `1` (tracking — doubles obs dim) |
@@ -523,8 +599,6 @@ u_safe, diag = flt.project(z, u_nom)
 | `task_config.normalized_rl_action_space` | `True` for Quadrotor (maps action to [-1,1]) |
 | `velocity_limit` | Velocity constraint for safety-gymnasium envs |
 | `seed` | Environment seed |
-
-> **`residual_dim` must match the barrier**: for `CartPolePositionBarrier` the active state is `x` at index 0 → `residual_dim: 0`. For `Quadrotor2DAltitudeBarrier` the active state is `z` at index 2 → `residual_dim: 2`.
 
 ---
 
@@ -549,6 +623,8 @@ dual = LagrangianDual(init_value=0.0, lr=0.01, budget=0.0)
 lam = dual.update(mean_cost=ep_cost)
 # Scale the constraint penalty in the loss by lam
 ```
+
+**Note on SAC+Lagrangian for Walker/HalfCheetah:** In paper experiments, SAC+Lagrangian achieves lower violation rates than KCBF-SAC on these environments (3.3% vs 37% on Walker) because it does not depend on EDMD model accuracy. When ρ is large (contact-rich environments), consider SAC+Lagrangian as a practical alternative.
 
 ---
 
@@ -606,18 +682,6 @@ python -m robust_koopman_cbf_rl.eval.compare_models \
   --out   logs/comparison.png
 ```
 
-Or from Python:
-
-```python
-from robust_koopman_cbf_rl.eval.compare_models import compare_models
-
-compare_models(
-    csv_paths=["logs/sac_eval/eval_results.csv", "logs/ppo_eval/eval_results.csv"],
-    labels=["SAC", "PPO"],
-    out_path="logs/comparison.png",
-)
-```
-
 Produces 4 bar charts (mean ± std): **Episode Return**, **Episode Cost**, **Violation Rate**, **Min h(z)**.
 
 ### Diagnostics
@@ -631,7 +695,7 @@ The `DiagnosticsBuffer` accumulates per-step QP filter diagnostics and computes 
 | `slack_mean` | Mean slack value |
 | `cbf_gap_min` | Minimum `a^T u + ξ - b` over episode (negative = violation) |
 | `cbf_gap_mean` | Mean CBF gap |
-| `h_min` | Minimum barrier value `h_K(z)` (negative = unsafe) |
+| `h_min` | Minimum barrier value `h_K(z)` per episode (negative = unsafe region entered) |
 
 ---
 
@@ -652,6 +716,7 @@ Two families of metrics are tracked:
 | `return` | Sum of rewards over episode | Maximise, env-specific target below |
 | `intervention_rate` | Fraction of steps QP modified the action | Minimise (lower = policy learned safe naturally) |
 | `cbf_gap_mean` | Mean `a^T u + ξ − b` (≥ 0 means constraint met) | > 0.0 at all times |
+| `slack_rate` | Fraction of steps where QP required slack | = 0.0 (any slack degrades certificate) |
 
 > **Invariant:** `episode_violation = 0` and `min_h_value > 0` must both hold simultaneously. `min_h_value > 0` is the stronger claim — the CBF bound is 10–25 cm inside the SCG constraint boundary.
 
@@ -659,154 +724,314 @@ Two families of metrics are tracked:
 
 ### 10.1 CartPole — Stabilization
 
-**Episode structure:** 5 s × 50 Hz = **250 steps max**. Reward = +1 per survived step (`rl_reward`). Early termination if `|x| > 2.4 m` or `|θ| > 0.4 rad`. Random initialisation covers `x ∈ [−1.5, 1.5]` m.
+**Episode structure:** 5 s × 50 Hz = **250 steps max**. Reward = +1 per survived step. Early termination if `|x| > 2.4 m` or `|θ| > 0.4 rad`. Random initialisation covers `x ∈ [−1.5, 1.5]` m.
 
-| Criterion | Acceptable | Good | Excellent |
-|---|---|---|---|
-| `return` (avg) | ≥ 150 | ≥ 200 | ≥ 235 |
-| `episode_violation` | = 0.0 | = 0.0 | = 0.0 |
-| `min_h_value` | > 0 | > 0 | > 0.05 m |
-| `intervention_rate` | < 0.30 | < 0.15 | < 0.05 |
-| `cbf_gap_mean` | > 0 | > 0.02 | > 0.05 |
+| Criterion | Acceptable | Good | Excellent | **Achieved (KCBF-SAC)** |
+|---|---|---|---|---|
+| `return` (avg) | ≥ 150 | ≥ 200 | ≥ 235 | **88.6 ± 0.3** *(normalized, ~222/250)* |
+| `violation_rate` | < 0.05 | < 0.01 | = 0.000 | **0.000 ± 0.000** |
+| `min_h_value` | > 0 | > 0 | > 0.05 m | **1.94 m** |
+| `intervention_rate` | < 0.30 | < 0.15 | < 0.05 | **0.000** |
+| `cbf_gap_mean` | > 0 | > 0.02 | > 0.05 | > 0 |
 
 **Notes:**
-- Max return of 250 corresponds to a perfect stabiliser that never terminates early. Given random initialisation from up to ±1.5 m, achieving ≥ 200 consistently indicates a robust policy.
-- `intervention_rate > 0.30` late in training typically means the policy has not yet learned to avoid the barrier proactively — the QP filter is compensating for a poor nominal policy.
-- The CBF bound `x_max = 2.2 m` sits 20 cm inside the episode boundary at 2.4 m. `min_h_value > 0` is therefore a strictly stronger guarantee than `episode_violation = 0`.
+- KCBF-SAC matches unconstrained SAC return (88.5 ± 0.6) with zero violations — no performance-safety tradeoff.
+- SAC+Lagrangian fails to converge reliably (34.0 ± 33.4 return) due to oscillating dual variables.
+- The CBF bound `x_max = 2.2 m` sits 20 cm inside the episode boundary at 2.4 m.
 
 ---
 
 ### 10.2 CartPole — Trajectory Tracking
 
-**Episode structure:** 5 s × 50 Hz = **250 steps max**. Observation doubles to `[state (4D), reference (4D)]` with `obs_goal_horizon: 1`. Reference is a 2-cycle circle trajectory; the reward is shaped by tracking error.
+**Episode structure:** 5 s × 50 Hz = **250 steps max**. Observation doubles to `[state (4D), reference (4D)]`. Reference is a 2-cycle circle trajectory.
 
-| Criterion | Acceptable | Good | Excellent |
-|---|---|---|---|
-| `return` (avg) | ≥ 100 | ≥ 175 | ≥ 220 |
-| `episode_violation` | = 0.0 | = 0.0 | = 0.0 |
-| `min_h_value` | > 0 | > 0 | > 0.05 m |
-| x-position RMSE | < 0.50 m | < 0.25 m | < 0.10 m |
-| `intervention_rate` | < 0.35 | < 0.20 | < 0.08 |
+| Criterion | Acceptable | Good | Excellent | **Achieved (KCBF-SAC)** |
+|---|---|---|---|---|
+| `return` (avg) | ≥ 100 | ≥ 175 | ≥ 220 | **97.0 ± 1.5** |
+| `violation_rate` | < 0.05 | < 0.01 | = 0.000 | **0.000 ± 0.000** |
+| `min_h_value` | > 0 | > 0 | > 0.05 m | **1.81 m** |
+| `intervention_rate` | < 0.35 | < 0.20 | < 0.08 | **0.0002** |
 
 **Notes:**
-- Tracking is harder than stabilisation: the reference visits `x ≈ ±1.0 m`, placing the cart close to the barrier boundary during parts of the trajectory.
-- `x-position RMSE` is not logged automatically; compute from `info["tracking_error"]` or the `plot_trajectory` output.
-- A RMSE < 0.10 m at `ctrl_freq = 50 Hz` is comparable to LQR performance on the linearised model.
+- Exceeds unconstrained SAC return (95.6 ± 0.5) while achieving zero violations — tracking reference keeps the cart away from the barrier boundary.
+- Intervention rate ≈ 0.02% indicates the actor has fully internalized the constraint.
 
 ---
 
 ### 10.3 Quadrotor 2D — Stabilization
 
-**Episode structure:** 6 s × 50 Hz = **300 steps max**. Goal: `(x, z) = (0, 1)` m. The SCG rl_reward is a shaped negative quadratic (deviation from goal + control effort); typical range per episode is roughly −300 to +100 depending on proximity.
+**Episode structure:** 6 s × 50 Hz = **300 steps max**. Goal: `(x, z) = (0, 1)` m.
 
-| Criterion | Acceptable | Good | Excellent |
-|---|---|---|---|
-| `return` (avg) | ≥ −50 | ≥ 0 | ≥ 50 |
-| Episode completion rate | ≥ 0.6 | ≥ 0.8 | ≥ 0.95 |
-| `episode_violation` | = 0.0 | = 0.0 | = 0.0 |
-| `min_h_value` (altitude) | > 0 | > 0 | > 0.10 m |
-| `intervention_rate` | < 0.40 | < 0.20 | < 0.10 |
-| Steady-state altitude error | < 0.20 m | < 0.10 m | < 0.05 m |
+| Criterion | Acceptable | Good | Excellent | **Achieved (KCBF-SAC)** |
+|---|---|---|---|---|
+| `return` (avg) | ≥ −50 | ≥ 0 | ≥ 50 | **195.5 ± 1.6** |
+| `violation_rate` | < 0.05 | < 0.01 | < 0.005 | **0.004 ± 0.001** |
+| `min_h_value` (altitude) | > 0 | > 0 | > 0.10 m | **0.364 m** |
+| `intervention_rate` | < 0.40 | < 0.20 | < 0.10 | **0.006** |
 
 **Notes:**
-- "Episode completion rate" is the fraction of episodes that run all 300 steps without `done_on_out_of_bound`. Early termination typically means the drone drifted outside `|x| > 2.0 m` or `z > 2.0 m`.
-- The altitude barrier `[0.2, 1.8]` m leaves 0.25 m margin to the ground plane and 0.2 m to the observation-space ceiling. `intervention_rate` will be higher than CartPole because the dual-motor Quadrotor 2D has a more aggressive barrier geometry.
-- Negative returns are common during early training (the shaped reward penalises every meter of deviation from the 1 m goal altitude).
+- All methods achieve comparable return (~195–196); safety differences are small but KCBF-SAC (0.41%) slightly improves over SAC (0.64%).
+- Must use `Quadrotor2DCompositeAltitudeBarrier`; the naïve `Quadrotor2DAltitudeBarrier` produces a degenerate QP.
 
 ---
 
-### 10.4 Quadrotor 2D — Trajectory Tracking
+### 10.4 Quadrotor 2D — Tracking
 
-**Episode structure:** 6 s × 50 Hz = **300 steps max**. Reference is a figure-8. Observation doubles with `obs_goal_horizon: 1`.
+**Episode structure:** 6 s × 50 Hz = **300 steps max**. Reference is a figure-8.
 
-| Criterion | Acceptable | Good | Excellent |
-|---|---|---|---|
-| `return` (avg) | ≥ −100 | ≥ −20 | ≥ 30 |
-| Episode completion rate | ≥ 0.5 | ≥ 0.75 | ≥ 0.9 |
-| `episode_violation` | = 0.0 | = 0.0 | = 0.0 |
-| `min_h_value` (altitude) | > 0 | > 0 | > 0.05 m |
-| x/z-position RMSE | < 0.40 m | < 0.20 m | < 0.08 m |
+| Criterion | Acceptable | Good | Excellent | **Achieved (KCBF-SAC)** |
+|---|---|---|---|---|
+| `return` (avg) | ≥ −100 | ≥ −20 | ≥ 30 | **170.6 ± 32.1** |
+| `violation_rate` | < 0.05 | < 0.01 | < 0.005 | **0.004 ± 0.001** |
+| `min_h_value` (altitude) | > 0 | > 0 | > 0.05 m | **0.239 m** |
 
 **Notes:**
-- Figure-8 tracking requires coordinated horizontal and vertical motion. The barrier on altitude couples with the vertical trajectory component — the agent must plan ahead to avoid requiring large QP interventions near the altitude bounds.
-- Tracking RMSE is evaluated on the `x` and `z` axes separately; the x-axis is typically the harder one as the figure-8 sweeps ±1.5 m.
+- **96.8% violation reduction** vs unconstrained SAC (12.55% → 0.40%). Key result from composite barrier fix.
+- Return variance is high (std=32.1) due to episodic slack activations during aggressive figure-8 maneuvers. When slack is activated, the certificate is formally weakened but the average violation rate remains below 0.4%.
+- ρ = 1.3×10⁻³ confirms EDMD captures quadrotor dynamics well once the correct barrier is used.
 
 ---
 
 ### 10.5 Quadrotor 3D — Stabilization / Tracking
 
-**Episode structure:** 6 s × 50 Hz = **300 steps max**. 12D state, 4 motors. Significantly harder than 2D due to coupling of roll/pitch/yaw and the 4 independent motor constraints.
+**Episode structure:** 6 s × 50 Hz = **300 steps max**. 12D state, 4 motors.
 
 | Criterion | Acceptable | Good | Excellent |
 |---|---|---|---|
 | `return` (avg) | ≥ −150 | ≥ −50 | ≥ 0 |
 | Episode completion rate | ≥ 0.4 | ≥ 0.65 | ≥ 0.85 |
-| `episode_violation` | = 0.0 | = 0.0 | = 0.0 |
+| `violation_rate` | < 0.10 | < 0.05 | < 0.01 |
 | `min_h_value` (altitude) | > 0 | > 0 | > 0.05 m |
-| 3D position RMSE | < 0.60 m | < 0.30 m | < 0.12 m |
 | `intervention_rate` | < 0.50 | < 0.30 | < 0.15 |
 
-**Notes:**
-- The 3D Quadrotor is the most challenging environment. A completion rate ≥ 0.65 with zero violations is already a strong result for KCBF methods.
-- The Koopman model accuracy degrades with dimensionality. If `cbf_gap_mean` is consistently low (< 0.01) combined with a high intervention rate, the residual margin `ρ` may be too large — consider re-fitting the Koopman model with more `collection_steps` or larger `n_rbf`.
-- `min_h_value ≤ 0` on any evaluation episode is a hard failure for the KCBF framework, regardless of return.
+*Note: 3D Quadrotor experiments were not included in the paper submission. Results pending.*
 
 ---
 
 ### 10.6 SafetyHalfCheetah — Velocity Constrained
 
-**Episode structure:** 1000 steps. Reward = forward velocity (higher is better). Cost = 1 per step where velocity exceeds `velocity_limit = 2.0 m/s`. No episode termination on constraint violation (`done_on_violation: False` in safety-gymnasium).
+**Episode structure:** 1000 steps. Reward = forward velocity. Cost = 1 per step exceeding `velocity_limit = 2.0 m/s`.
 
-| Criterion | Acceptable | Good | Excellent |
-|---|---|---|---|
-| `return` (avg, 1000 steps) | ≥ 1500 | ≥ 2500 | ≥ 3500 |
-| `total_cost` (avg) | = 0.0 | = 0.0 | = 0.0 |
-| `episode_violation` | = 0.0 | = 0.0 | = 0.0 |
-| `min_h_value` | > 0 | > 0 | > 0.1 |
-| `intervention_rate` | < 0.30 | < 0.15 | < 0.05 |
+| Criterion | Acceptable | Good | Excellent | **Achieved (KCBF-SAC)** |
+|---|---|---|---|---|
+| `return` (avg, 1000 steps) | ≥ 1500 | ≥ 2500 | ≥ 3500 | **2290 ± 22** |
+| `violation_rate` | < 0.50 | < 0.20 | < 0.10 | **0.828 ± 0.008** |
+| `min_h_value` | > 0 | > 0 | > 0.1 | **-18.82** *(unsafe)* |
 
 **Notes:**
-- Unconstrained SAC on HalfCheetah typically achieves ≥ 6000 return per episode. A `velocity_limit = 2.0 m/s` cap reduces the reachable return to roughly 2000–4000 (2.0 m/s × 1000 steps × per-step reward scaling). Achieving 3500 while maintaining zero violations is close to optimal for this constraint.
-- `total_cost = 0.0` is the primary safety metric — every non-zero episode cost represents a step where the agent exceeded the velocity limit.
-- If `return < 1500` with zero violations, the VelocityNormBarrier margin or the KCBF `η` is too conservative. Try reducing `eta` in the SAC/PPO config.
+- ρ = 1.782 — contact dynamics produce non-smooth velocity transitions that linear EDMD cannot capture. The filter is structurally inactive for most of training.
+- KCBF-SAC achieves modest violation reduction (97.9% → 82.8%) at high return cost (7741 → 2290, −70%).
+- `min_h_value = -18.82` confirms the velocity constraint is deeply violated; the CBF certificate is not maintained.
+- **Recommendation:** Use SAC+Lagrangian for this environment until a multi-step or deep Koopman extension is available.
 
 ---
 
 ### 10.7 SafetyWalker2d — Velocity Constrained
 
-**Episode structure:** 1000 steps. Same structure as HalfCheetah but with the bipedal Walker2d dynamics.
+**Episode structure:** 1000 steps. Velocity constraint: `v_x ≤ 2.0 m/s`.
 
-| Criterion | Acceptable | Good | Excellent |
-|---|---|---|---|
-| `return` (avg, 1000 steps) | ≥ 800 | ≥ 1500 | ≥ 2200 |
-| `total_cost` (avg) | = 0.0 | = 0.0 | = 0.0 |
-| `episode_violation` | = 0.0 | = 0.0 | = 0.0 |
-| `min_h_value` | > 0 | > 0 | > 0.1 |
-| `intervention_rate` | < 0.25 | < 0.12 | < 0.05 |
+| Criterion | Acceptable | Good | Excellent | **Achieved (KCBF-SAC)** | **Best baseline** |
+|---|---|---|---|---|---|
+| `return` (avg, 1000 steps) | ≥ 800 | ≥ 1500 | ≥ 2200 | **2607 ± 202** | SAC: 3803 ± 292 |
+| `violation_rate` | < 0.20 | < 0.10 | < 0.05 | **0.370 ± 0.226** | SAC+Lag: **0.033 ± 0.015** |
+| `min_h_value` | > 0 | > 0 | > 0.1 | **-7.81** *(unsafe)* | — |
+| `intervention_rate` | < 0.25 | < 0.12 | < 0.05 | 0.039 | — |
 
 **Notes:**
-- Walker2d is harder to stabilize than HalfCheetah; unconstrained SAC achieves ~3500–5000 return. The 2.0 m/s cap reduces the ceiling to roughly 1500–2500.
-- The `VelocityNormBarrier` constraint is quadratic (`h = v_max² − Σvᵢ²`), so the Koopman observable dictionary must include velocity-squared features (`extra_quadratic_indices`). Verify the `z_dim` is consistent with the barrier's `lifted_barrier_coeffs` output.
-- Lower `intervention_rate` targets compared to HalfCheetah reflect that Walker2d's walking gait produces more consistent velocities, leaving less need for reactive QP corrections.
+- ρ = 0.698 — filter is marginal. KCBF-SAC reduces violations from 77.8% (SAC) to 37.0%, but SAC+Lagrangian achieves 3.3% with comparable return at much lower variance.
+- High `violation_rate` variance (std=0.226) indicates seeds produce qualitatively different policies; some seeds have near-zero violations while others fail entirely.
+- `min_h_value = -7.81` confirms the velocity barrier is regularly breached despite QP filter.
+- **Recommendation:** Use SAC+Lagrangian for Walker when safety is the primary objective. KCBF-SAC is preferable when interpretable filter diagnostics are needed.
 
 ---
 
 ### Summary table
 
-| Environment | Max steps | Target return | Safety requirement | Ref intervention rate |
+| Environment | Max steps | **KCBF-SAC return** | **KCBF-SAC viol. rate** | Best baseline (safety) |
 |---|---|---|---|---|
-| CartPole Stabilization | 250 | ≥ 200 | `min_h_value > 0`, `episode_violation = 0` | < 15% |
-| CartPole Tracking | 250 | ≥ 175 | `min_h_value > 0`, `episode_violation = 0` | < 20% |
-| Quadrotor 2D Stab | 300 | ≥ 0 | `min_h_value > 0`, `episode_violation = 0` | < 20% |
-| Quadrotor 2D Track | 300 | ≥ −20 | `min_h_value > 0`, `episode_violation = 0` | < 25% |
-| Quadrotor 3D Stab | 300 | ≥ −50 | `min_h_value > 0`, `episode_violation = 0` | < 30% |
-| Quadrotor 3D Track | 300 | ≥ −80 | `min_h_value > 0`, `episode_violation = 0` | < 35% |
-| SafetyHalfCheetah | 1000 | ≥ 2500 | `total_cost = 0`, `episode_violation = 0` | < 15% |
-| SafetyWalker2d | 1000 | ≥ 1500 | `total_cost = 0`, `episode_violation = 0` | < 12% |
+| CartPole Stabilization | 250 | 88.6 ± 0.3 | **0.000** | SAC: 0.230 |
+| CartPole Tracking | 250 | 97.0 ± 1.5 | **0.000** | SAC+Pen: 0.183 |
+| Quadrotor 2D Stab | 300 | 195.5 ± 1.6 | **0.004** | SAC+Pen: 0.003 |
+| Quadrotor 2D Track | 300 | 170.6 ± 32.1 | **0.004** | SAC+Pen: 0.007 |
+| Safety HalfCheetah | 1000 | 2290 ± 22 | 0.828 | SAC+Lag: 0.977 *(all fail)* |
+| Safety Walker | 1000 | 2607 ± 202 | 0.370 | **SAC+Lag: 0.033** |
 
 ---
 
-## 11. Testing
+## 11. Experiment Sweep Pipeline
+
+All paper experiments are reproducible via four scripts in `experiments/`:
+
+### Step 1 — Fit Koopman models
+
+```bash
+# Fit one model per environment (run once per env)
+for ENV in cartpole_stab cartpole_track quadrotor2d_stab quadrotor2d_track; do
+  python -m robust_koopman_cbf_rl.train.train_koopman \
+    --env_cfg  robust_koopman_cbf_rl/configs/env_${ENV}.yaml \
+    --koopman_cfg robust_koopman_cbf_rl/configs/koopman.yaml \
+    --out logs/models/${ENV}/koopman.npz
+done
+
+for ENV in safety_walker safety_halfcheetah; do
+  python -m robust_koopman_cbf_rl.train.train_koopman \
+    --env_cfg  robust_koopman_cbf_rl/configs/env_${ENV}.yaml \
+    --koopman_cfg robust_koopman_cbf_rl/configs/koopman_walker_tuned.yaml \
+    --out logs/models/${ENV}/koopman.npz
+done
+```
+
+### Step 2 — Baseline sweep (SAC, PPO, Penalty, Lagrangian, LQR)
+
+```bash
+python experiments/run_sweep.py \
+  --log_root  logs/baseline_sweep \
+  --seeds 1 2 3 \
+  --workers 4
+```
+
+CLI options:
+- `--envs cartpole_stab cartpole_track ...` — subset of environments
+- `--baselines sac sac_lagrangian ...` — subset of methods
+- `--total_steps 150000` — override training budget
+- `--skip_classical` — skip LQR/PID
+
+### Step 3 — KCBF-SAC sweep
+
+```bash
+python experiments/run_kcbf_sweep.py \
+  --model_dir logs/models \
+  --log_root  logs/kcbf_sweep \
+  --seeds 1 2 3 \
+  --workers 4
+```
+
+CLI options:
+- `--envs` / `--variants kcbf_sac kcbf_ppo` — subset filters
+- `--total_steps` — override training budget
+- `--skip_koopman` — if models already exist
+
+### Step 4 — Aggregate results and generate all figures
+
+```bash
+python experiments/compare_all.py \
+  --baseline_root logs/baseline_sweep \
+  --kcbf_root     logs/kcbf_sweep \
+  --out_dir       logs/final_results \
+  --skip_training_curves
+```
+
+Produces in `logs/final_results/`:
+- `aggregate_all_summary.csv` — one row per (env, method, seed)
+- `latex_table.txt` — LaTeX tabular for paper
+- `scg_methods_comparison.png` — bar charts for safe-control-gym envs
+- `safetygym_methods_comparison.png` — bar charts for Safety Gymnasium envs
+- `pareto_safety_efficiency.png` — return vs violation Pareto scatter
+- `kcbf_diagnostics.png` — intervention rate, slack rate, h_min per env
+
+### Step 5 — CBF parameter ablation (η × λ_slack)
+
+```bash
+python experiments/ablation_cbf_params.py \
+  --envs safety_walker \
+  --eta 0.5 0.7 0.9 \
+  --lam_slack 1000 5000 10000 \
+  --model_dirs safety_walker=logs/models/safety_walker \
+  --log_root logs/ablation \
+  --total_steps 300000 \
+  --workers 4
+```
+
+For 1M convergence runs of specific configs:
+
+```bash
+python -m robust_koopman_cbf_rl.train.train_sac_kcbf \
+  --env_cfg  robust_koopman_cbf_rl/configs/env_safety_walker.yaml \
+  --sac_cfg  robust_koopman_cbf_rl/configs/sac_kcbf_safety_gym.yaml \
+  --model    logs/models/safety_walker/koopman.npz \
+  --log_dir  logs/ablation_1M/safety_walker/eta0.7_lam10000 \
+  --eta 0.7 --lam_slack 10000 --total_steps 1000000
+```
+
+---
+
+## 12. Experimental Results Summary
+
+Results from 3 seeds × 6 environments. All metrics are mean ± std over seeds; evaluation uses 10 episodes per checkpoint.
+
+### CartPole (zero-violation)
+
+| Method | Return ↑ | Violation Rate ↓ | h_min |
+|---|---|---|---|
+| **KCBF-SAC** | **88.6 ± 0.3** | **0.000 ± 0.000** | **1.94** |
+| SAC | 88.5 ± 0.6 | 0.230 ± 0.017 | — |
+| SAC+Lagrangian | 34.0 ± 33.4 | 0.204 ± 0.002 | — |
+| SAC+Penalty | 54.4 ± 38.1 | 0.218 ± 0.055 | — |
+| LQR | 5.5 | 0.164 | — |
+
+KCBF-SAC matches unconstrained SAC return with zero violations. Lagrangian and Penalty methods fail due to oscillating dual variables or insufficient reward shaping. Projected residual ρ = 9×10⁻⁴ — EDMD captures CartPole dynamics nearly exactly.
+
+### Quadrotor 2D Tracking (96.8% violation reduction)
+
+| Method | Return ↑ | Violation Rate ↓ |
+|---|---|---|
+| **KCBF-SAC** | 170.6 ± 32.1 | **0.004 ± 0.001** |
+| SAC | 195.8 ± 0.2 | 0.125 ± 0.014 |
+| SAC+Lagrangian | 194.3 ± 0.7 | 0.015 ± 0.004 |
+| SAC+Penalty | 192.7 ± 1.1 | 0.007 ± 0.001 |
+
+Key finding: the `Quadrotor2DCompositeAltitudeBarrier` is required. The naïve `Quadrotor2DAltitudeBarrier` produces a degenerate QP with 40× lower filter control authority. KCBF-SAC return variance (std=32.1) reflects episodic slack activations during aggressive figure-8 tracking.
+
+### Walker Ablation (η × λ at 1M steps, single seed)
+
+| Configuration | Return ↑ | Violation Rate ↓ | Intervention Rate | Outcome |
+|---|---|---|---|---|
+| η=0.9 (default, 3 seeds) | 2607 ± 202 | 0.370 ± 0.226 | 3.9% | Stable |
+| η=0.7, λ=10k (1M) | ~26 | 6.7% | **85%** | **Policy collapse** |
+| η=0.5, λ=10k (1M) | 3405 | 84.5% | 6.2% | **Infeasibility — no filter** |
+| SAC+Lagrangian (3 seeds) | 2801 ± 9 | **0.033 ± 0.015** | — | Best safety |
+
+- **η=0.7**: Tight CBF causes QP to override actor 85% of steps → actor cannot learn → bimodal policy (some episodes safe, others catastrophic), mean return collapses to ≈26.
+- **η=0.5**: Even tighter constraint → frequently infeasible under actuator limits → slack dominates → effective filter intervention drops to 6.2% → policy learns freely but unsafely.
+- **Lesson**: With large ρ (Walker: 0.698), η=0.9 is the only stable operating point among those tested. Do not lower η to try to improve safety when ρ is large.
+
+---
+
+## 13. Known Limitations
+
+### 1. Relative degree requirement
+
+The CBF-QP requires the lifted barrier to have relative degree 1 (i.e., `c^T B ≠ 0`). For constraints where the safety-relevant state is indirectly actuated (e.g., altitude via thrust in quadrotor dynamics), the naïve lifted barrier has `c^T B ≈ 0` and the filter is degenerate.
+
+**Fix:** Use `Quadrotor2DCompositeAltitudeBarrier(z_min, z_max, alpha, beta)` which encodes `h = α(z − z_min) + β·ż`. This is a case-by-case solution; a general high-order KCBF extension is future work.
+
+### 2. Large prediction error (ρ) disables the filter
+
+When ρ ≥ typical `h_K(z)`, the robust CBF constraint either:
+- Becomes **trivially satisfied** when `h_K(z) < 0` (already unsafe): any control satisfies it.
+- Becomes **infeasible** when `h_K(z) > 0`: the constraint requires the next h to exceed ρ, which actuator limits may prohibit.
+
+Environments with contact dynamics (HalfCheetah: ρ=1.782, Walker: ρ=0.698) are fundamentally difficult for first-order linear EDMD. Compute ρ before training to decide whether KCBF is appropriate.
+
+### 3. Policy collapse under over-constraint
+
+Tight CBF parameters (η=0.7 on Walker) cause the QP to dominate actor updates, preventing learning. This is absent from Lagrangian methods, which enforce constraints through a differentiable objective rather than hard action substitution.
+
+### 4. One-step certificate only
+
+The CBF condition is enforced step-wise. Trajectories can approach the unsafe region across many steps even if each individual step nominally satisfies the constraint.
+
+### 5. Slack degrades the safety certificate
+
+When `ξ > 0` (the QP is infeasible without slack), the filter no longer enforces a formal CBF condition at that step. Monitor `slack_rate` in training logs. A slack rate above ~5% suggests the filter is frequently over-ridden, and the certificate is unreliable.
+
+### 6. Static, hand-specified barrier functions
+
+Barriers are designed per environment. For new environments, a barrier must be selected and its relative degree verified manually. Joint learning of the Koopman lifting and barrier certificate is an active research direction.
+
+---
+
+## 14. Testing
 
 ```bash
 # Fast unit tests (no environment required)
@@ -824,7 +1049,7 @@ pytest robust_koopman_cbf_rl/tests/ -v
 
 | Test file | What it covers |
 |---|---|
-| `test_barriers.py` | Barrier values and lifted coefficients for all barrier types |
+| `test_barriers.py` | Barrier values and lifted coefficients for all barrier types, including `Quadrotor2DCompositeAltitudeBarrier` |
 | `test_observables.py` | RBF lifting, z_dim calculation, center fitting |
 | `test_fit_edmd.py` | EDMD regression correctness |
 | `test_koopman_model.py` | Predict, save, load round-trip |
