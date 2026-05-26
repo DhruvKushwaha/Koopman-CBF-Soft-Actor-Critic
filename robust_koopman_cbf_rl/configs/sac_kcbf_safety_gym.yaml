@@ -1,0 +1,19 @@
+# KCBF-SAC for Safety Gymnasium (HalfCheetah, Walker, etc.).
+# Base SAC parameters are identical to sac_safety_gym.yaml for fair same-budget comparison.
+# KCBF-specific additions: lam_h (actor CBF penalty), eta (CBF decay), lam_slack (QP).
+#
+# total_steps: 1M — matches sac_safety_gym.yaml, ppo_safety_gym.yaml, ppo_kcbf_safety_gym.yaml.
+# eta=0.9: relaxed for velocity barriers (h = v_max - v changes slowly; tight eta
+#   causes excessive QP interventions during early training before policy has converged).
+# lam_slack=1000: consistent with all other KCBF configs.
+total_steps: 1000000
+warmup_steps: 10000
+batch_size: 256
+buffer_capacity: 1000000
+gamma: 0.99
+tau: 0.005
+lr: 3.0e-4
+alpha: 0.2
+lam_h: 1.0
+eta: 0.9
+lam_slack: 1000.0

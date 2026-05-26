@@ -1,0 +1,64 @@
+# CartPole stabilization — env config aligned with SCG RL examples.
+# ctrl_freq=15 Hz, episode=10s, wider init ranges, normalized action space,
+# inertial props, and rl_reward weights from safe-control-gym/examples/rl/config_overrides.
+kind: safe_control_gym
+env_id: cartpole
+task_config:
+  task: stabilization
+  ctrl_freq: 15
+  pyb_freq: 750
+  episode_len_sec: 10
+  cost: rl_reward
+  obs_goal_horizon: 0
+  randomized_init: True
+  normalized_rl_action_space: True
+  done_on_out_of_bound: True
+  done_on_violation: False
+
+  task_info:
+    stabilization_goal: [0.7, 0]
+    stabilization_goal_tolerance: 0.0
+
+  inertial_prop:
+    pole_length: 0.5
+    cart_mass: 1
+    pole_mass: 0.1
+
+  rew_state_weight: [1, 1, 1, 1]
+  rew_act_weight: 0.1
+  rew_exponential: True
+
+  # Wider init ranges matching SCG RL example (cartpole_stab.yaml).
+  init_state_randomization_info:
+    init_x:
+      distrib: uniform
+      low: -2.0
+      high: 2.0
+    init_x_dot:
+      distrib: uniform
+      low: -2.0
+      high: 2.0
+    init_theta:
+      distrib: uniform
+      low: -0.16
+      high: 0.16
+    init_theta_dot:
+      distrib: uniform
+      low: -1.0
+      high: 1.0
+
+  # SCG constraint checker bounds (tighter than CBF barrier).
+  constraints:
+    - constraint_form: default_constraint
+      constrained_variable: state
+      upper_bounds: [2.0, 2.0, 0.16, 1.0]
+      lower_bounds: [-2.0, -2.0, -0.16, -1.0]
+    - constraint_form: default_constraint
+      constrained_variable: input
+
+seed: 0
+
+barrier:
+  class: CartPolePositionBarrier
+  x_max: 2.2
+  side: right

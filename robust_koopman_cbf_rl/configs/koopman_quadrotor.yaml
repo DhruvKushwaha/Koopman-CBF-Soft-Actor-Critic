@@ -1,0 +1,22 @@
+# Koopman model config for Quadrotor 2D (stab and track).
+# Optimal config from tune_koopman.py sweep (logs/koopman_tuning/quadrotor_results.csv).
+#
+# state_dim=6: [x, x_dot, z, z_dot, theta, theta_dot]; action_dim=2.
+# n_rbf=32: balances rho_95 and rho_max. n_rbf=16 has rho_95=0.001 but rho_max=0.033
+#   (rho_ratio=33.6x — heavy tail). n_rbf=32 at 10k steps: rho_max=0.025, rho_ratio=16.1x.
+# bandwidth=0: auto-heuristic resolves to ~2.05 from median pairwise distance at 10k steps.
+# collection_steps=10000: 40 episodes — enough coverage without entering unstable regimes
+#   (n_steps=20000 is worse: random policy reaches high-pitch states where linearity fails,
+#   rho_max rises to 0.062).
+# ridge=0.01: light regularization; auto-bandwidth reduces need for heavy ridge.
+#
+# Key metrics: rho_95=0.00157, rho_max=0.025, rho_ratio=16.1x, r2_z=0.795
+# (vs Walker baseline: rho_95=0.698)
+n_rbf: 32
+bandwidth: 0
+ridge: 1.0e-2
+alpha: 0.95
+collection_steps: 10000
+seed: 0
+margin_mode: global
+n_clusters: 4

@@ -1,0 +1,16 @@
+# Legacy standalone KCBF-SAC config (used when calling train_sac_kcbf.py directly).
+# For sweeps, use sac_kcbf_cartpole.yaml or sac_kcbf_safety_gym.yaml instead.
+# Hyperparams aligned with SCG HPO-tuned CartPole config (same as sac_kcbf_cartpole.yaml).
+total_steps: 500000
+warmup_steps: 100
+batch_size: 512
+buffer_capacity: 1000000
+gamma: 0.98
+tau: 0.12
+lr: 4.52e-4
+actor_lr: 4.52e-4
+critic_lr: 2.25e-2
+alpha: 0.2
+lam_h: 1.0
+eta: 0.5
+lam_slack: 1000.0

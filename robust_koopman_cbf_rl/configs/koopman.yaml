@@ -1,0 +1,8 @@
+n_rbf: 64
+bandwidth: 1.0
+ridge: 1.0e-6
+alpha: 0.95
+collection_steps: 50000
+seed: 0
+margin_mode: global
+n_clusters: 8

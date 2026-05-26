@@ -1,0 +1,80 @@
+kind: safe_control_gym
+env_id: quadrotor
+task_config:
+  quad_type: 2
+  task: traj_tracking
+  ctrl_freq: 50
+  pyb_freq: 1000
+  physics: pyb
+  normalized_rl_action_space: True
+  episode_len_sec: 5
+  cost: rl_reward
+  obs_goal_horizon: 1       # SCG default for tracking: 1 lookahead step
+  randomized_init: True
+  randomized_inertial_prop: False
+  done_on_out_of_bound: True
+  done_on_violation: False
+
+  # Reward shaping — matches SCG examples/rl/quadrotor_2D track config.
+  # Position-focused: x (index 0) and z (index 2) weighted 1; velocities/angle 0.01.
+  rew_state_weight: [1, 0.01, 1, 0.01, 0.01, 0.01]
+  rew_act_weight: 0.01
+  rew_exponential: True
+
+  task_info:
+    trajectory_type: circle
+    num_cycles: 1
+    trajectory_plane: xz
+    trajectory_position_offset: [0, 1]   # circle centered at (x=0, z=1)
+    trajectory_scale: 0.5                # radius 0.5m → z ∈ [0.5, 1.5], well within CBF bounds
+
+  inertial_prop:
+    M: 0.027
+    Iyy: 1.4e-05
+
+  init_state_randomization_info:
+    init_x:
+      distrib: uniform
+      low: -2.0
+      high: 2.0
+    init_x_dot:
+      distrib: uniform
+      low: -1.0
+      high: 1.0
+    init_z:
+      distrib: uniform
+      low: 0.3
+      high: 2.0
+    init_z_dot:
+      distrib: uniform
+      low: -1.0
+      high: 1.0
+    init_theta:
+      distrib: uniform
+      low: -0.2
+      high: 0.2
+    init_theta_dot:
+      distrib: uniform
+      low: -1.5
+      high: 1.5
+
+  # State: [x, x_dot, z, z_dot, theta, theta_dot]
+  # CBF barrier z_min=0.2, z_max=1.8; circle trajectory z ∈ [0.5, 1.5] — fully safe.
+  constraints:
+    - constraint_form: default_constraint
+      constrained_variable: state
+      upper_bounds: [2.0, 1.0, 2.0, 1.0, 0.2, 1.5]
+      lower_bounds: [-2.0, -1.0, 0.0, -1.0, -0.2, -1.5]
+    - constraint_form: default_constraint
+      constrained_variable: input
+      upper_bounds: [0.29, 0.29]
+      lower_bounds: [0.06, 0.06]
+
+seed: 0
+
+barrier:
+  class: Quadrotor2DCompositeAltitudeBarrier
+  z_min: 0.2
+  z_max: 1.8
+  alpha: 1.0   # weight on (z - z_min): altitude deficit
+  beta: 0.5    # weight on z_dot: dampens fast descent near the floor

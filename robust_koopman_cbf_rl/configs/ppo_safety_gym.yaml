@@ -1,0 +1,14 @@
+# PPO for Safety Gymnasium (HalfCheetah, Walker, etc.).
+# Based on: OmniSafe PPO-Lag (Ji et al. NeurIPS 2023) — more epochs, zero entropy coef.
+# total_steps matches sac_safety_gym.yaml (1M) for fair same-budget comparison.
+total_steps: 1000000
+rollout_len: 2048
+epochs: 40
+minibatch: 64
+lr: 3.0e-4
+clip: 0.2
+c_v: 0.5
+c_e: 0.0
+gamma: 0.99
+lam: 0.95
+# lam_h / eta / lam_slack are KCBF-only params; see ppo_kcbf_safety_gym.yaml.

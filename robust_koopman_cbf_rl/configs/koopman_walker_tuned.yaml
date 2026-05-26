@@ -1,0 +1,15 @@
+# Tuned Koopman config for safety_walker.
+# Parameters selected via tune_koopman.py sweep (see logs/koopman_tuning/results.csv).
+#   n_rbf=256:           rho_95=0.6559 (vs 0.648 for 512; marginal gap, 2x faster)
+#   bandwidth=0:         auto-compute from data via median pairwise distance heuristic
+#   collection_steps=200000: optimal for Walker; plateau beyond 200k (tuning study)
+#   ridge=1e-6:          minimal regularization; data is plentiful at 200k steps
+#   alpha=0.95:          95th-percentile margin for CBF safety guarantee
+n_rbf: 256
+bandwidth: 0
+ridge: 1.0e-6
+alpha: 0.95
+collection_steps: 200000
+seed: 0
+margin_mode: global
+n_clusters: 8

@@ -1,0 +1,20 @@
+# PPO for safe-control-gym CartPole (stabilization and tracking).
+# Hyperparameters adapted from SCG HPO-tuned config (safe-control-gym/examples/rl):
+#   gamma=0.98, rollout_len=150 (=15Hz×10s, one full episode), clip=0.1
+#   actor_lr=7.95e-4, critic_lr=7.50e-3, epochs=5, minibatch=128
+#   c_e=1.08e-4 (very small entropy bonus), lam=0.8 (GAE lambda from SCG gae_lambda)
+#
+# total_steps: 500k — matches sac_cartpole.yaml for fair same-budget comparison.
+total_steps: 500000
+rollout_len: 150
+epochs: 5
+minibatch: 128
+lr: 7.95e-4
+actor_lr: 7.95e-4
+critic_lr: 7.50e-3
+clip: 0.1
+c_v: 0.5
+c_e: 1.08e-4
+gamma: 0.98
+lam: 0.8
+# lam_h / eta / lam_slack are KCBF-only params; see ppo_kcbf_cartpole.yaml.

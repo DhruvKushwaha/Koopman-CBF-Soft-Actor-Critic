@@ -1,0 +1,20 @@
+# KCBF-SAC for safe-control-gym Quadrotor 2D (stabilization and tracking).
+# Base SAC params identical to sac_quadrotor.yaml for same-budget comparison.
+#
+# eta=0.5 at 50Hz (20ms/step): h(t+1) >= 0.5*h(t) - rho.
+#   With rho~0.001 (near-linear drone dynamics), this is essentially h(t+1) >= 0.5*h(t).
+#   Conservative but not overly restrictive — 5 steps to reach 0 from h=0.03.
+# lam_slack=1000: high QP penalty; quadrotor rho<<1 means QP almost never infeasible.
+total_steps: 200000
+warmup_steps: 1000
+batch_size: 256
+buffer_capacity: 1000000
+gamma: 0.98
+tau: 0.12
+lr: 0.001
+actor_lr: 0.001
+critic_lr: 0.001
+alpha: 0.2
+lam_h: 1.0
+eta: 0.5
+lam_slack: 1000.0

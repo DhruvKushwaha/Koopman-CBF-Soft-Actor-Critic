@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: robust_koopman_cbf_rl
+Version: 0.1.0
+Requires-Python: >=3.10
+Requires-Dist: numpy>=1.26
+Requires-Dist: scipy>=1.11
+Requires-Dist: torch>=2.1
+Requires-Dist: gymnasium>=0.29
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: qpsolvers[osqp]>=4.0
+Requires-Dist: matplotlib>=3.8
+Requires-Dist: pandas>=2.1
+Provides-Extra: safety
+Requires-Dist: safety-gymnasium>=1.0; extra == "safety"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4; extra == "dev"
+Requires-Dist: pytest-cov>=4.1; extra == "dev"

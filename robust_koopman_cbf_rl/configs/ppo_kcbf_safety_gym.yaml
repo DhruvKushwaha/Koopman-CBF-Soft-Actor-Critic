@@ -1,0 +1,22 @@
+# KCBF-PPO for Safety Gymnasium (HalfCheetah, Walker, etc.).
+# Base PPO parameters are identical to ppo_safety_gym.yaml for fair same-budget comparison.
+# KCBF-specific additions: lam_h (actor CBF penalty), eta (CBF decay), lam_slack (QP).
+#
+# total_steps: 1M — matches sac_safety_gym.yaml, ppo_safety_gym.yaml, sac_kcbf_safety_gym.yaml.
+# rollout_len=2048: standard for MuJoCo continuous-control tasks.
+# epochs=40: more update passes per rollout (OmniSafe PPO-Lag standard for Safety Gymnasium).
+# c_e=0.0: zero entropy bonus (safety tasks require deterministic convergence).
+# eta=0.9: relaxed for velocity barriers; same as sac_kcbf_safety_gym.yaml.
+total_steps: 1000000
+rollout_len: 2048
+epochs: 40
+minibatch: 64
+lr: 3.0e-4
+clip: 0.2
+c_v: 0.5
+c_e: 0.0
+gamma: 0.99
+lam: 0.95
+lam_h: 1.0
+eta: 0.9
+lam_slack: 1000.0

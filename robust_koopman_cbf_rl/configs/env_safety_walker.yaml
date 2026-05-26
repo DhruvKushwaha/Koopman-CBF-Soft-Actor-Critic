@@ -1,0 +1,13 @@
+kind: safety_gymnasium
+env_id: SafetyWalker2dVelocity-v1
+velocity_limit: 2.0
+seed: 0
+
+barrier:
+  class: VelocityNormBarrier
+  v_max: 2.0
+  # Walker2d obs layout: qpos (9 dims, indices 0-8) | qvel (9 dims, indices 9-17).
+  # Using only forward velocity (index 8, rootx translational vel) as a conservative default.
+  # VALIDATE these indices against your safety_gymnasium version before use —
+  # obs layout varies between safety_gymnasium releases and gym versions.
+  vel_indices: [8]

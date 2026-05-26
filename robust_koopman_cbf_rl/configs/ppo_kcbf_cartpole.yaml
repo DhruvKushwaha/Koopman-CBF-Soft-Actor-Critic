@@ -1,0 +1,21 @@
+# KCBF-PPO for safe-control-gym CartPole.
+# Base PPO params identical to ppo_cartpole.yaml for fair same-budget comparison.
+# KCBF-specific additions: lam_h (actor CBF penalty), eta (CBF decay), lam_slack (QP).
+#
+# rollout_len=150: matches 15Hz × 10s = one full episode per rollout.
+# eta=0.5: CBF decay per step at 15 Hz; consistent with sac_kcbf_cartpole.yaml.
+total_steps: 500000
+rollout_len: 150
+epochs: 5
+minibatch: 128
+lr: 7.95e-4
+actor_lr: 7.95e-4
+critic_lr: 7.50e-3
+clip: 0.1
+c_v: 0.5
+c_e: 1.08e-4
+gamma: 0.98
+lam: 0.8
+lam_h: 1.0
+eta: 0.5
+lam_slack: 1000.0

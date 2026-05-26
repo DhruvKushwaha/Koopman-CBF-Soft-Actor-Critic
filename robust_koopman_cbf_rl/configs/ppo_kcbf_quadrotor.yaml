@@ -1,0 +1,20 @@
+# KCBF-PPO for safe-control-gym Quadrotor 2D (stabilization and tracking).
+# Base PPO params identical to ppo_quadrotor.yaml for same-budget comparison.
+#
+# rollout_len=1000: 4 full episodes of 250 steps; consistent with ppo_quadrotor.yaml.
+# eta=0.5: CBF decay per step; consistent with sac_kcbf_quadrotor.yaml.
+total_steps: 500000
+rollout_len: 1000
+epochs: 20
+minibatch: 256
+lr: 0.001
+actor_lr: 0.001
+critic_lr: 0.001
+clip: 0.1
+c_v: 0.5
+c_e: 0.01
+gamma: 0.98
+lam: 0.8
+lam_h: 1.0
+eta: 0.5
+lam_slack: 1000.0

@@ -1,0 +1,12 @@
+# SAC for Safety Gymnasium (HalfCheetah, Walker, etc.).
+# Based on: OmniSafe SAC-Lag (Ji et al. NeurIPS 2023), SafePO benchmarks.
+# Key deltas from sac_kcbf.yaml: total_steps 1M, warmup 10k, eta 0.9 (relaxed velocity CBF).
+total_steps: 1000000
+warmup_steps: 10000
+batch_size: 256
+buffer_capacity: 1000000
+gamma: 0.99
+tau: 0.005
+lr: 3.0e-4
+alpha: 0.2
+# lam_h / eta / lam_slack are KCBF-only params; see sac_kcbf_safety_gym.yaml.

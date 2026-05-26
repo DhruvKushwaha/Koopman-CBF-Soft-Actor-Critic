@@ -1,0 +1,18 @@
+# Legacy standalone KCBF-PPO config (used when calling train_ppo_kcbf.py directly).
+# For sweeps, use ppo_kcbf_cartpole.yaml or ppo_kcbf_safety_gym.yaml instead.
+# Hyperparams aligned with SCG HPO-tuned CartPole config (same as ppo_kcbf_cartpole.yaml).
+total_steps: 500000
+rollout_len: 150
+epochs: 5
+minibatch: 128
+lr: 7.95e-4
+actor_lr: 7.95e-4
+critic_lr: 7.50e-3
+clip: 0.1
+c_v: 0.5
+c_e: 1.08e-4
+gamma: 0.98
+lam: 0.8
+lam_h: 1.0
+eta: 0.5
+lam_slack: 1000.0

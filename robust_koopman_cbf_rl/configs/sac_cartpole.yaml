@@ -1,0 +1,18 @@
+# SAC for safe-control-gym CartPole (stabilization and tracking).
+# Hyperparameters adapted from SCG HPO-tuned config (safe-control-gym/examples/rl):
+#   tau=0.12, batch=512, buffer=1M, gamma=0.98, warmup=100
+#   actor_lr=4.52e-4, critic_lr=2.25e-2 (separate lrs — critic learns ~50x faster)
+#
+# total_steps: 500k — matches ppo_cartpole.yaml for fair same-budget comparison.
+# At ctrl_freq=15 Hz, episode=10s: 150 steps/ep → ~3333 episodes per 500k steps.
+total_steps: 500000
+warmup_steps: 1000
+batch_size: 512
+buffer_capacity: 1000000
+gamma: 0.98
+tau: 0.12
+lr: 4.52e-4
+actor_lr: 4.52e-4
+critic_lr: 2.25e-2
+alpha: 0.2
+# lam_h / eta / lam_slack are KCBF-only params; see sac_kcbf_cartpole.yaml.

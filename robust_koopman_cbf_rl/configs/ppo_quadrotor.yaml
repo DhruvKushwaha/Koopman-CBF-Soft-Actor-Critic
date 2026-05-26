@@ -1,0 +1,20 @@
+# PPO for safe-control-gym Quadrotor 2D (stabilization and tracking).
+# Hyperparameters from SCG examples/rl/config_overrides/quadrotor_2D/ppo_quadrotor_2D.yaml.
+# ctrl_freq=50 Hz, episode_len=5s → 250 steps/episode.
+#
+# rollout_len=1000: 4 full episodes per rollout (SCG uses rollout_steps=1000).
+# opt_epochs=20: more gradient steps per rollout vs cartpole (epochs=5); SCG tuned.
+# actor_lr=critic_lr=0.001: symmetric, matching SCG (cartpole used asymmetric HPO values).
+# c_e=0.01: higher entropy bonus than cartpole (1.08e-4); quadrotor needs exploration.
+total_steps: 500000
+rollout_len: 1000
+epochs: 20
+minibatch: 256
+lr: 0.001
+actor_lr: 0.001
+critic_lr: 0.001
+clip: 0.1
+c_v: 0.5
+c_e: 0.01
+gamma: 0.98
+lam: 0.8

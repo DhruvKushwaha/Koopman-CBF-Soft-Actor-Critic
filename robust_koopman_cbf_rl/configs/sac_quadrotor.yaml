@@ -1,0 +1,17 @@
+# SAC for safe-control-gym Quadrotor 2D (stabilization and tracking).
+# Hyperparameters taken from SCG examples/rl/config_overrides/quadrotor_2D/sac_quadrotor_2D.yaml.
+# ctrl_freq=50 Hz, episode_len=5s → 250 steps/episode. 200k steps ≈ 800 episodes.
+#
+# actor_lr = critic_lr = 0.001: symmetric learning rates (SCG default; differs from
+#   cartpole which used HPO-tuned asymmetric rates 4.52e-4 / 2.25e-2).
+# alpha=0.2 fixed (SCG sets use_entropy_tuning=False for quadrotor).
+total_steps: 200000
+warmup_steps: 1000
+batch_size: 256
+buffer_capacity: 1000000
+gamma: 0.98
+tau: 0.12
+lr: 0.001
+actor_lr: 0.001
+critic_lr: 0.001
+alpha: 0.2
