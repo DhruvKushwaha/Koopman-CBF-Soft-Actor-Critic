@@ -1,5 +1,7 @@
 # Robust Koopman CBF-RL
 
+Paper: [Robust Koopman Control Barrier Filters for Safe Actor-Critic Reinforcement Learning](https://arxiv.org/abs/2605.26452) — Dhruv S. Kushwaha, Zoleikha A. Biron
+
 A framework for **safe reinforcement learning** via Koopman operator theory and Control Barrier Functions (CBFs). A data-driven Koopman model of the environment dynamics is fitted offline using Extended Dynamic Mode Decomposition (EDMD). The model, together with an empirical robustness margin derived from prediction residuals, is used to construct a discrete-time CBF constraint. At every time step a lightweight QP safety filter projects the nominal RL action onto the safe set before it is applied to the environment. The filter is differentiable with respect to the actor parameters, enabling a soft CBF penalty term in the actor loss.
 
 Two RL backbones are provided:
